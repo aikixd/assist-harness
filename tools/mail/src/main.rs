@@ -32,6 +32,7 @@ fn run() -> Result<String, AppError> {
 
     match command {
         Command::Help => Ok(cli::help_text()),
+        Command::ConfigProvider => commands::config::provider::run(),
         Command::ConfigAccountAdd => commands::config::account_add::run(),
         Command::Accounts => commands::accounts::run(),
         Command::List(args) => commands::list::run(args),

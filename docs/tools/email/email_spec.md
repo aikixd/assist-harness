@@ -127,6 +127,7 @@ For Google V1, the supported auth path should use a loopback redirect listener r
 
 V1 commands:
 - `pa-mail help`
+- `pa-mail config provider`
 - `pa-mail config account add`
 - `pa-mail accounts`
 - `pa-mail list --since <time> [--until <time>] [--account <email>] [--label <label>] [--limit <n>] [--json]`
@@ -257,6 +258,26 @@ Rules:
 - account config should only be written after successful token exchange
 - if the account already exists, the command should fail clearly rather than silently duplicating it
 - the listener should be generic shared OAuth infrastructure, not Google-specific infrastructure inside the mail crate
+
+## `config provider` Command
+
+Purpose:
+- store local provider app credentials needed for OAuth setup
+- keep provider credentials out of the repo and out of tracked dotfiles
+
+Syntax:
+- `pa-mail config provider`
+
+V1 interaction flow:
+1. prompt for provider
+2. prompt for provider-specific credential values
+3. write them to local config under `~/.config/pa/mail/providers/`
+4. print the stored config path
+
+Rules:
+- credentials are stored locally per tool
+- provider config is separate from account config
+- `config account add` should use the stored provider config rather than requiring env vars for routine setup
 
 ## `list` Command
 

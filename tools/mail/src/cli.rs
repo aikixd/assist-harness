@@ -3,6 +3,7 @@ use crate::error::AppError;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Help,
+    ConfigProvider,
     ConfigAccountAdd,
     Accounts,
     List(ListArgs),
@@ -55,6 +56,7 @@ pub fn help_text() -> String {
         "",
         "Commands:",
         "  pa-mail help",
+        "  pa-mail config provider",
         "  pa-mail config account add",
         "  pa-mail accounts",
         "  pa-mail list --since <time> [--until <time>] [--account <email>] [--label <label>] [--limit <n>] [--json]",
@@ -74,19 +76,16 @@ pub fn help_text() -> String {
         "  - ~/.config/pa/mail/accounts.txt",
         "  - one account per line: <email> <provider>",
         "  - example: personal@gmail.com google",
-        "",
-        "OAuth env vars:",
-        "  - PA_MAIL_GOOGLE_CLIENT_ID",
-        "  - PA_MAIL_GOOGLE_CLIENT_SECRET",
     ]
     .join("\n")
 }
 
 fn parse_config(args: &[String]) -> Result<Command, AppError> {
     match args {
+        [provider] if provider == "provider" => Ok(Command::ConfigProvider),
         [account, add] if account == "account" && add == "add" => Ok(Command::ConfigAccountAdd),
         _ => Err(AppError::usage(format!(
-            "supported config command: pa-mail config account add\n\n{}",
+            "supported config commands:\n  pa-mail config provider\n  pa-mail config account add\n\n{}",
             help_text()
         ))),
     }
@@ -274,5 +273,11 @@ mod tests {
             "add".to_string(),
         ]);
         assert_eq!(result, Ok(Command::ConfigAccountAdd));
+    }
+
+    #[test]
+    fn config_provider_is_supported() {
+        let result = parse(["config".to_string(), "provider".to_string()]);
+        assert_eq!(result, Ok(Command::ConfigProvider));
     }
 }

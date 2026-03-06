@@ -1,6 +1,6 @@
 use oauth::{exchange_code_with_curl, load_client_config, OAuthClientConfig, TokenResponse};
 
-use crate::config::{AccountEntry, Provider};
+use crate::config::{load_provider_client_config, AccountEntry, Provider};
 use crate::domain::{MessageDetail, MessageSummary};
 use crate::error::AppError;
 
@@ -36,6 +36,10 @@ pub fn provider_name() -> &'static str {
 }
 
 pub fn load_oauth_client() -> Result<OAuthClientConfig, AppError> {
+    if let Ok(config) = load_provider_client_config(&Provider::Google) {
+        return Ok(config);
+    }
+
     load_client_config(CLIENT_ID_ENV, CLIENT_SECRET_ENV)
         .map_err(|error| AppError::config(format!("{error}")))
 }
