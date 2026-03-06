@@ -146,6 +146,17 @@ pub fn store_token(
     Ok(token_path)
 }
 
+pub fn load_token(tool: &str, account_email: &str) -> Result<TokenResponse, OAuthError> {
+    let token_path = account_token_path(tool, account_email)?;
+    let raw_json = fs::read_to_string(&token_path).map_err(|error| {
+        OAuthError::Io(format!(
+            "failed to read token {}: {error}",
+            token_path.display()
+        ))
+    })?;
+    parse_token_response(&raw_json)
+}
+
 pub fn start_loopback_listener() -> Result<LoopbackListener, OAuthError> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| {
         OAuthError::ListenerBind(format!("failed to bind loopback listener: {error}"))
@@ -240,6 +251,71 @@ pub fn exchange_code_with_curl(
     })?;
 
     parse_token_response(&raw_json)
+}
+
+pub fn refresh_token_with_curl(
+    token_endpoint: &str,
+    client: &OAuthClientConfig,
+    refresh_token: &str,
+) -> Result<TokenResponse, OAuthError> {
+    let body = format!(
+        "client_id={}&client_secret={}&refresh_token={}&grant_type=refresh_token",
+        percent_encode(&client.client_id),
+        percent_encode(&client.client_secret),
+        percent_encode(refresh_token),
+    );
+
+    let output = std::process::Command::new("curl")
+        .arg("--silent")
+        .arg("--show-error")
+        .arg("--fail")
+        .arg("-X")
+        .arg("POST")
+        .arg(token_endpoint)
+        .arg("-H")
+        .arg("Content-Type: application/x-www-form-urlencoded")
+        .arg("--data")
+        .arg(body)
+        .output()
+        .map_err(|error| OAuthError::ProcessFailure(format!("failed to run curl: {error}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            "curl exited with a non-zero status during token refresh".to_string()
+        } else {
+            format!("token refresh failed: {stderr}")
+        };
+        return Err(OAuthError::ProcessFailure(message));
+    }
+
+    let raw_json = String::from_utf8(output.stdout).map_err(|error| {
+        OAuthError::ProcessFailure(format!("refresh response was not valid UTF-8: {error}"))
+    })?;
+
+    parse_token_response(&raw_json)
+}
+
+pub fn merge_token_response(previous: &TokenResponse, updated: &TokenResponse) -> TokenResponse {
+    let merged = TokenResponse {
+        access_token: updated.access_token.clone(),
+        refresh_token: updated
+            .refresh_token
+            .clone()
+            .or_else(|| previous.refresh_token.clone()),
+        scope: updated.scope.clone().or_else(|| previous.scope.clone()),
+        token_type: updated
+            .token_type
+            .clone()
+            .or_else(|| previous.token_type.clone()),
+        expires_in: updated.expires_in.or(previous.expires_in),
+        raw_json: String::new(),
+    };
+
+    TokenResponse {
+        raw_json: token_response_to_json(&merged),
+        ..merged
+    }
 }
 
 fn sanitize_filename(input: &str) -> String {
@@ -424,6 +500,46 @@ fn parse_token_response(raw_json: &str) -> Result<TokenResponse, OAuthError> {
     })
 }
 
+fn token_response_to_json(token: &TokenResponse) -> String {
+    let mut fields = vec![format!(
+        "\"access_token\":\"{}\"",
+        json_escape(&token.access_token)
+    )];
+
+    if let Some(refresh_token) = &token.refresh_token {
+        fields.push(format!(
+            "\"refresh_token\":\"{}\"",
+            json_escape(refresh_token)
+        ));
+    }
+    if let Some(scope) = &token.scope {
+        fields.push(format!("\"scope\":\"{}\"", json_escape(scope)));
+    }
+    if let Some(token_type) = &token.token_type {
+        fields.push(format!("\"token_type\":\"{}\"", json_escape(token_type)));
+    }
+    if let Some(expires_in) = token.expires_in {
+        fields.push(format!("\"expires_in\":{expires_in}"));
+    }
+
+    format!("{{{}}}", fields.join(","))
+}
+
+fn json_escape(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
+
 fn extract_json_string(raw_json: &str, key: &str) -> Option<String> {
     let pattern = format!("\"{key}\"");
     let start = raw_json.find(&pattern)?;
@@ -532,5 +648,30 @@ mod tests {
         assert_eq!(parsed.access_token, "at");
         assert_eq!(parsed.refresh_token.as_deref(), Some("rt"));
         assert_eq!(parsed.expires_in, Some(3600));
+    }
+
+    #[test]
+    fn merge_token_response_preserves_refresh_token() {
+        let previous = TokenResponse {
+            access_token: "old-at".to_string(),
+            refresh_token: Some("rt".to_string()),
+            scope: Some("s".to_string()),
+            token_type: Some("Bearer".to_string()),
+            expires_in: Some(3600),
+            raw_json: "{}".to_string(),
+        };
+        let updated = TokenResponse {
+            access_token: "new-at".to_string(),
+            refresh_token: None,
+            scope: None,
+            token_type: Some("Bearer".to_string()),
+            expires_in: Some(3600),
+            raw_json: "{}".to_string(),
+        };
+
+        let merged = merge_token_response(&previous, &updated);
+        assert_eq!(merged.access_token, "new-at");
+        assert_eq!(merged.refresh_token.as_deref(), Some("rt"));
+        assert!(merged.raw_json.contains("\"refresh_token\":\"rt\""));
     }
 }

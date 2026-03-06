@@ -4,8 +4,11 @@ mod config;
 mod domain;
 mod error;
 mod interactive;
+mod json;
 mod output;
 mod providers;
+mod render;
+mod time;
 
 use cli::Command;
 use error::AppError;

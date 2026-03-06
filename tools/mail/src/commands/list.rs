@@ -32,9 +32,13 @@ pub fn run(args: ListArgs) -> Result<String, AppError> {
     let mut blocks = Vec::new();
     for account in selected_accounts {
         let messages = list_messages(account, &query)?;
+        let unread = messages
+            .iter()
+            .filter(|message| message.labels.iter().any(|label| label == "unread"))
+            .count();
         blocks.push(AccountMessageBlock {
             account: account.email.clone(),
-            unread: 0,
+            unread,
             total: messages.len(),
             messages,
         });

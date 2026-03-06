@@ -6,7 +6,6 @@ pub enum AppErrorKind {
     Usage,
     Config,
     Query,
-    NotImplemented,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,13 +32,6 @@ impl AppError {
     pub fn query(message: impl Into<String>) -> Self {
         Self {
             kind: AppErrorKind::Query,
-            message: message.into(),
-        }
-    }
-
-    pub fn not_implemented(message: impl Into<String>) -> Self {
-        Self {
-            kind: AppErrorKind::NotImplemented,
             message: message.into(),
         }
     }
