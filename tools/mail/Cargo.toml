@@ -1,0 +1,11 @@
+[package]
+name = "mail"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+oauth = { path = "../../libs/oauth" }
+
+[[bin]]
+name = "pa-mail"
+path = "src/main.rs"

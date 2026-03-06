@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "libs/oauth",
+    "tools/mail",
+]
+resolver = "2"
