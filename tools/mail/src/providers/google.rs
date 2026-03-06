@@ -198,12 +198,7 @@ impl GmailSession {
     fn fetch_message_metadata(&self, message_id: &str) -> Result<ListMessageDetail, AppError> {
         let response = self.api_get_message_with_params(
             message_id,
-            &[
-                ("format".to_string(), "metadata".to_string()),
-                ("metadataHeaders".to_string(), "From".to_string()),
-                ("metadataHeaders".to_string(), "To".to_string()),
-                ("metadataHeaders".to_string(), "Subject".to_string()),
-            ],
+            &[("format".to_string(), "full".to_string())],
         )?;
         let root = parse_json(&response).map_err(|error| {
             AppError::query(format!("failed to parse Gmail metadata response: {error}"))
@@ -218,14 +213,11 @@ impl GmailSession {
             .parse::<i64>()
             .map_err(|_| AppError::query("Gmail message internalDate was invalid"))?;
         let date = epoch_millis_to_local_timestamp(internal_date_millis)?;
-        let snippet = root
-            .get("snippet")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("")
-            .to_string();
-        let headers = root
+        let payload = root
             .get("payload")
-            .and_then(|value| value.get("headers"))
+            .ok_or_else(|| AppError::query("Gmail metadata response is missing payload"))?;
+        let headers = payload
+            .get("headers")
             .and_then(JsonValue::as_array)
             .ok_or_else(|| AppError::query("Gmail metadata response is missing headers"))?;
 
@@ -235,6 +227,9 @@ impl GmailSession {
             .and_then(JsonValue::as_array)
             .map(|items| self.map_labels(items))
             .unwrap_or_default();
+        let mut collector = PartCollector::default();
+        collector.visit_part(payload)?;
+        let preview_source = render_body_text(&collector, &root);
 
         Ok(ListMessageDetail {
             id,
@@ -245,7 +240,7 @@ impl GmailSession {
             to: header_map.get("to").cloned().unwrap_or_default(),
             subject: header_map.get("subject").cloned().unwrap_or_default(),
             labels,
-            preview_source: snippet,
+            preview_source,
         })
     }
 
@@ -321,7 +316,7 @@ impl GmailSession {
         let (status, body, stderr) = self.api_get_with_status(&path, params)?;
         match status {
             200 => Ok(body),
-            404 => Err(AppError::query(format!(
+            400 | 404 => Err(AppError::query(format!(
                 "message with id {message_id} not found"
             ))),
             code => {
@@ -399,22 +394,7 @@ fn parse_message_detail(
 
     let mut collector = PartCollector::default();
     collector.visit_part(payload)?;
-
-    let body_text = if !collector.text_bodies.is_empty() {
-        collector.text_bodies.join("\n\n")
-    } else if !collector.html_bodies.is_empty() {
-        collector
-            .html_bodies
-            .iter()
-            .map(|body| html_to_readable_text(body))
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    } else {
-        root.get("snippet")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("")
-            .to_string()
-    };
+    let body_text = render_body_text(&collector, root);
     let links = extract_links(&body_text);
 
     Ok(MessageDetail {
@@ -487,6 +467,27 @@ impl PartCollector {
 
         Ok(())
     }
+}
+
+fn render_body_text(collector: &PartCollector, root: &JsonValue) -> String {
+    if !collector.text_bodies.is_empty() {
+        return collector.text_bodies.join("\n\n");
+    }
+
+    if !collector.html_bodies.is_empty() {
+        return collector
+            .html_bodies
+            .iter()
+            .map(|body| html_to_readable_text(body))
+            .filter(|body| !body.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+    }
+
+    root.get("snippet")
+        .and_then(JsonValue::as_str)
+        .map(html_to_readable_text)
+        .unwrap_or_default()
 }
 
 fn message_matches_time_window(

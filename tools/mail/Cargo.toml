@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+html-to-markdown-rs = "2.3"
 oauth = { path = "../../libs/oauth" }
 
 [[bin]]
