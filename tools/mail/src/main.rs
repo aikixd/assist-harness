@@ -34,7 +34,7 @@ fn run() -> Result<String, AppError> {
     let command = cli::parse(std::env::args().skip(1))?;
 
     match command {
-        Command::Help => Ok(cli::help_text()),
+        Command::Help(topic) => Ok(cli::help_text(topic)),
         Command::ConfigProvider => commands::config::provider::run(),
         Command::ConfigAccountAdd => commands::config::account_add::run(),
         Command::Accounts => commands::accounts::run(),

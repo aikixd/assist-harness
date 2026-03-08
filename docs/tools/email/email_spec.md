@@ -126,7 +126,7 @@ For Google V1, the supported auth path should use a loopback redirect listener r
 ## Command Surface
 
 V1 commands:
-- `pa-mail help`
+- `pa-mail --help`
 - `pa-mail config provider`
 - `pa-mail config account add`
 - `pa-mail accounts`
@@ -151,6 +151,11 @@ Time semantics:
 - provider timestamps may arrive in UTC or with explicit offsets, but filtering must behave by comparing normalized instants
 - `--since` is inclusive
 - `--until` is exclusive
+
+Practical validation guidance:
+- for normal end-to-end validation, it is usually enough to pick a real message timestamp and verify coherent behavior around that instant with small windows such as `timestamp - 1 minute` and `timestamp + 1 minute`
+- this gives strong confidence that normalization and boundary handling are correct
+- a dedicated local-vs-UTC crossover fixture is still useful later if we want stronger regression coverage
 
 ## Query Model
 
@@ -297,7 +302,7 @@ Text output conventions:
 - `acc:` starts each account block
 - `unread:` is used instead of `new:`
 - `total:` reports total returned after filters for that account
-- `---` separates messages
+- each message is surrounded by `---` markers
 - `====` separates account groups
 
 Required message fields in text mode:

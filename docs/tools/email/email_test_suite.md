@@ -37,6 +37,11 @@ These semantics come from the authoritative spec and must be treated as test-cri
 
 This is the most important behavior area to validate early because timezone mistakes can silently hide or surface messages incorrectly.
 
+Practical test guidance:
+- for routine live validation, it is enough to take a known message timestamp and query around it with a narrow local-time window such as `timestamp - 1 minute` and `timestamp + 1 minute`
+- if the inclusion and exclusion behavior is coherent across those small windows, that is strong practical evidence that time handling is correct
+- a dedicated local-vs-UTC crossover fixture remains useful for stronger explicit regression coverage later
+
 ## Fixture Guidance
 
 The suite should rely on a very small controlled set of known messages rather than broad assumptions about live inbox contents.
@@ -85,7 +90,7 @@ Expected behavior:
 - account groups are ordered by account email
 - each account block starts with `acc:`
 - each account block includes `unread:` and `total:`
-- messages are separated by `---`
+- each message is surrounded by `---`
 - account groups are separated by `====`
 
 ### 3. Single-Account List Filter

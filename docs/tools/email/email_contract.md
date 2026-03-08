@@ -20,7 +20,7 @@ Goal: let the assistant triage one or more inboxes without sending mail or modif
   - avoids generic command collisions
 
 ## Required Commands
-- `pa-mail help`
+- `pa-mail --help`
 - `pa-mail accounts`
 - `pa-mail list --since <time> [--until <time>] [--account <id>] [--label <label>] [--limit <n>]`
 - `pa-mail get <id> [--account <id>]`
