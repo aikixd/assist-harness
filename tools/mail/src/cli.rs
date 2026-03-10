@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use crate::providers::MessageState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -25,6 +26,7 @@ pub struct ListArgs {
     pub since: String,
     pub until: Option<String>,
     pub account: Option<String>,
+    pub state: MessageState,
     pub label: Option<String>,
     pub limit: Option<usize>,
     pub json: bool,
@@ -86,7 +88,7 @@ fn general_help_text() -> String {
         "    Add one mailbox account and complete OAuth setup.",
         "  pa-mail accounts",
         "    List configured accounts and their status.",
-        "  pa-mail list --since <time> [--until <time>] [--account <email>] [--label <label>] [--limit <n>] [--json]",
+        "  pa-mail list --since <time> [--until <time>] [--account <email>] [--state <read|unread|all>] [--label <label>] [--limit <n>] [--json]",
         "    List recent matching messages.",
         "  pa-mail get <id> <email> [--json]",
         "    Fetch one message in detail.",
@@ -189,7 +191,7 @@ fn list_help_text() -> String {
         "  List recent matching messages in compact text by default.",
         "",
         "Usage:",
-        "  pa-mail list --since <time> [--until <time>] [--account <email>] [--label <label>] [--limit <n>] [--json]",
+        "  pa-mail list --since <time> [--until <time>] [--account <email>] [--state <read|unread|all>] [--label <label>] [--limit <n>] [--json]",
         "",
         "Parameters:",
         "  --since <time>",
@@ -198,6 +200,8 @@ fn list_help_text() -> String {
         "    Optional. Upper time bound, exclusive.",
         "  --account <email>",
         "    Optional. Restrict results to one mailbox.",
+        "  --state <read|unread|all>",
+        "    Optional. Provider-agnostic message state filter. Defaults to all.",
         "  --label <label>",
         "    Optional. Google-specific label filter.",
         "  --limit <n>",
@@ -273,6 +277,7 @@ fn parse_list(args: &[String]) -> Result<Command, AppError> {
     let mut since = None;
     let mut until = None;
     let mut account = None;
+    let mut state = MessageState::All;
     let mut label = None;
     let mut limit = None;
     let mut json = false;
@@ -288,6 +293,15 @@ fn parse_list(args: &[String]) -> Result<Command, AppError> {
             }
             "--account" => {
                 account = Some(take_value(args, &mut index, "--account")?);
+            }
+            "--state" => {
+                let value = take_value(args, &mut index, "--state")?;
+                state = MessageState::parse(&value).ok_or_else(|| {
+                    AppError::usage(format!(
+                        "invalid value for --state: {value}\n\n{}",
+                        help_text(HelpTopic::List)
+                    ))
+                })?;
             }
             "--label" => {
                 label = Some(take_value(args, &mut index, "--label")?);
@@ -324,6 +338,7 @@ fn parse_list(args: &[String]) -> Result<Command, AppError> {
         since,
         until,
         account,
+        state,
         label,
         limit,
         json,
@@ -413,6 +428,8 @@ mod tests {
             "2026-03-06T14:30".to_string(),
             "--account".to_string(),
             "personal@gmail.com".to_string(),
+            "--state".to_string(),
+            "unread".to_string(),
             "--label".to_string(),
             "inbox".to_string(),
             "--limit".to_string(),
@@ -429,6 +446,7 @@ mod tests {
 
         assert_eq!(args.since, "2026-03-06T14:30");
         assert_eq!(args.account.as_deref(), Some("personal@gmail.com"));
+        assert_eq!(args.state, MessageState::Unread);
         assert_eq!(args.label.as_deref(), Some("inbox"));
         assert_eq!(args.limit, Some(5));
         assert!(args.json);
@@ -484,6 +502,34 @@ mod tests {
         let help = help_text(HelpTopic::General);
         assert!(help.contains("Required time format:"));
         assert!(help.contains("YYYY-MM-DDTHH:MM"));
+    }
+
+    #[test]
+    fn list_defaults_state_to_all() {
+        let result = parse([
+            "list".to_string(),
+            "--since".to_string(),
+            "2026-03-06T14:30".to_string(),
+        ]);
+
+        let Command::List(args) = result.expect("expected list command") else {
+            panic!("expected list command");
+        };
+
+        assert_eq!(args.state, MessageState::All);
+    }
+
+    #[test]
+    fn list_rejects_invalid_state() {
+        let result = parse([
+            "list".to_string(),
+            "--since".to_string(),
+            "2026-03-06T14:30".to_string(),
+            "--state".to_string(),
+            "unknown".to_string(),
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]

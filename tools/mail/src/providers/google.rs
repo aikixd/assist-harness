@@ -13,7 +13,7 @@ use crate::json::{parse as parse_json, JsonValue};
 use crate::render::{extract_links, html_to_readable_text, preview_text};
 use crate::time::{epoch_millis_to_local_timestamp, local_timestamp_to_epoch_seconds};
 
-use super::ListQuery;
+use super::{ListQuery, MessageState};
 
 const TOOL_NAME: &str = "mail";
 const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -517,6 +517,11 @@ fn build_gmail_query(query: &ListQuery) -> Result<String, AppError> {
         let until = local_timestamp_to_epoch_seconds(until)?;
         filters.push(format!("before:{until}"));
     }
+    match query.state {
+        MessageState::Read => filters.push("is:read".to_string()),
+        MessageState::Unread => filters.push("is:unread".to_string()),
+        MessageState::All => {}
+    }
     Ok(filters.join(" "))
 }
 
@@ -617,5 +622,39 @@ mod tests {
     fn base64_url_decoder_handles_unpadded_input() {
         let decoded = decode_base64_url("SGVsbG8").unwrap();
         assert_eq!(String::from_utf8(decoded).unwrap(), "Hello");
+    }
+
+    #[test]
+    fn build_gmail_query_adds_state_filters() {
+        let unread = build_gmail_query(&ListQuery {
+            since: "2026-03-06T14:30".to_string(),
+            until: None,
+            state: MessageState::Unread,
+            label: None,
+            limit: None,
+        })
+        .expect("unread query should build");
+        assert!(unread.contains("is:unread"));
+
+        let read = build_gmail_query(&ListQuery {
+            since: "2026-03-06T14:30".to_string(),
+            until: None,
+            state: MessageState::Read,
+            label: None,
+            limit: None,
+        })
+        .expect("read query should build");
+        assert!(read.contains("is:read"));
+
+        let all = build_gmail_query(&ListQuery {
+            since: "2026-03-06T14:30".to_string(),
+            until: None,
+            state: MessageState::All,
+            label: None,
+            limit: None,
+        })
+        .expect("all query should build");
+        assert!(!all.contains("is:read"));
+        assert!(!all.contains("is:unread"));
     }
 }

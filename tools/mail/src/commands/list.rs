@@ -15,6 +15,7 @@ pub fn run(args: ListArgs) -> Result<String, AppError> {
     let query = ListQuery {
         since: args.since,
         until: args.until,
+        state: args.state,
         label: args.label,
         limit: args.limit,
     };

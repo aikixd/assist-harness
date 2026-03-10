@@ -5,9 +5,28 @@ use crate::domain::{MessageDetail, MessageSummary};
 use crate::error::AppError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageState {
+    Read,
+    Unread,
+    All,
+}
+
+impl MessageState {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "read" => Some(Self::Read),
+            "unread" => Some(Self::Unread),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListQuery {
     pub since: String,
     pub until: Option<String>,
+    pub state: MessageState,
     pub label: Option<String>,
     pub limit: Option<usize>,
 }
