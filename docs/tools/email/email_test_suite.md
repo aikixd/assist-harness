@@ -200,7 +200,31 @@ Expected behavior:
 - only messages matching the label are returned
 - formatting remains consistent with normal list output
 
-### 9. Local-Time Window Filtering
+### 9. State Filter
+
+Purpose:
+- confirm the provider-agnostic message state filter works as expected
+
+Commands:
+```text
+pa-mail list --since <time> --account <email> --state unread
+```
+
+```text
+pa-mail list --since <time> --account <email> --state read
+```
+
+```text
+pa-mail list --since <time> --account <email> --state all
+```
+
+Expected behavior:
+- `--state unread` returns only unread messages
+- `--state read` returns only read messages
+- `--state all` matches the default behavior when `--state` is omitted
+- formatting remains consistent with normal list output
+
+### 10. Local-Time Window Filtering
 
 Purpose:
 - confirm time filtering is evaluated in local CLI time
@@ -217,7 +241,7 @@ Expected behavior:
 - messages whose normalized timestamps fall inside `[since, until)` are included
 - messages outside that interval are excluded
 
-### 10. Local-vs-UTC Boundary Case
+### 11. Local-vs-UTC Boundary Case
 
 Purpose:
 - catch timezone bugs where provider UTC timestamps cross a local-date boundary
@@ -234,7 +258,7 @@ pa-mail list --since <local-time-a> --until <local-time-b> --account <email>
 Expected behavior:
 - inclusion/exclusion is correct according to local CLI time, not naive UTC date matching
 
-### 11. Inclusive `since` Boundary
+### 12. Inclusive `since` Boundary
 
 Purpose:
 - validate the lower bound explicitly
@@ -250,7 +274,7 @@ pa-mail list --since <exact-message-time> --until <later-time> --account <email>
 Expected behavior:
 - the message is included
 
-### 12. Exclusive `until` Boundary
+### 13. Exclusive `until` Boundary
 
 Purpose:
 - validate the upper bound explicitly

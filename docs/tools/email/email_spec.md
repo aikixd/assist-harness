@@ -130,7 +130,7 @@ V1 commands:
 - `pa-mail config provider`
 - `pa-mail config account add`
 - `pa-mail accounts`
-- `pa-mail list --since <time> [--until <time>] [--account <email>] [--label <label>] [--limit <n>] [--json]`
+- `pa-mail list --since <time> [--until <time>] [--account <email>] [--state <read|unread|all>] [--label <label>] [--limit <n>] [--json]`
 - `pa-mail get <id> <email> [--json]`
 
 Rules:
@@ -171,6 +171,7 @@ V1 filters:
 - `--since`
 - `--until`
 - `--account`
+- `--state`
 - `--label`
 - `--limit`
 
@@ -178,6 +179,9 @@ Semantics:
 - `--limit` is per account, not global
 - results are ordered newest first within each account
 - account groups are ordered by account email
+- `--state` is a provider-agnostic message-state filter
+- supported V1 values are `read`, `unread`, and `all`
+- the default `--state` value is `all`
 - `--label` is Google-specific in V1
 
 If a filter is unsupported for the selected account/provider, the tool should fail at query-planning time and avoid fetching results.
@@ -294,6 +298,7 @@ Supported flags:
 - `--since <time>`
 - `--until <time>`
 - `--account <email>`
+- `--state <read|unread|all>`
 - `--label <label>`
 - `--limit <n>`
 - `--json`

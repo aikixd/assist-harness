@@ -18,6 +18,13 @@ The tool is intended for personal use, so some cases can be handled when they fi
 
 - Add a stronger regression case for a known local-vs-UTC date crossover fixture once we naturally encounter one or create one intentionally.
 
+## Potential UX Improvements
+
+- Consider `pa-mail get --brief` to return headers plus a cleaned body summary and extracted links or attachments only.
+- Improve heavy HTML notification cleanup, especially for Notion and newsletter-style emails.
+- Strip tracking redirects, layout and table artifacts, duplicated blocks, quoted sections, and giant footer or legal boilerplate from cleaned bodies.
+- Preserve the small high-signal summary in notification emails instead of dumping the entire converted body when most of it is repetitive or low-value.
+
 ## Notes
 
 - Prefer adding concrete repro notes or commands here when one of these cases appears in real use.
