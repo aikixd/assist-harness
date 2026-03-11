@@ -36,6 +36,7 @@ pub struct ListArgs {
 pub struct GetArgs {
     pub id: String,
     pub account: String,
+    pub raw_body: bool,
     pub json: bool,
 }
 
@@ -90,7 +91,7 @@ fn general_help_text() -> String {
         "    List configured accounts and their status.",
         "  pa-mail list --since <time> [--until <time>] [--account <email>] [--state <read|unread|all>] [--label <label>] [--limit <n>] [--json]",
         "    List recent matching messages.",
-        "  pa-mail get <id> <email> [--json]",
+        "  pa-mail get <id> <email> [--raw-body] [--json]",
         "    Fetch one message in detail.",
         "",
         "Required time format:",
@@ -224,13 +225,15 @@ fn get_help_text() -> String {
         "  Fetch one message in detail.",
         "",
         "Usage:",
-        "  pa-mail get <id> <email> [--json]",
+        "  pa-mail get <id> <email> [--raw-body] [--json]",
         "",
         "Parameters:",
         "  <id>",
         "    Provider message id for the target message.",
         "  <email>",
         "    Mailbox email address that scopes the message lookup.",
+        "  --raw-body",
+        "    Optional. Skip body cleanup stripping and show the selected body with only basic conversion and normalization.",
         "  --json",
         "    Optional. Emit structured JSON instead of text.",
         "",
@@ -352,11 +355,16 @@ fn parse_get(args: &[String]) -> Result<Command, AppError> {
 
     let mut id = None;
     let mut account = None;
+    let mut raw_body = false;
     let mut json = false;
 
     for arg in args {
         if arg == "--json" {
             json = true;
+            continue;
+        }
+        if arg == "--raw-body" {
+            raw_body = true;
             continue;
         }
 
@@ -378,7 +386,7 @@ fn parse_get(args: &[String]) -> Result<Command, AppError> {
         }
 
         return Err(AppError::usage(format!(
-            "pa-mail get accepts only <id> <email> [--json]\n\n{}",
+            "pa-mail get accepts only <id> <email> [--raw-body] [--json]\n\n{}",
             help_text(HelpTopic::Get)
         )));
     }
@@ -396,7 +404,12 @@ fn parse_get(args: &[String]) -> Result<Command, AppError> {
         ))
     })?;
 
-    Ok(Command::Get(GetArgs { id, account, json }))
+    Ok(Command::Get(GetArgs {
+        id,
+        account,
+        raw_body,
+        json,
+    }))
 }
 
 fn take_value(args: &[String], index: &mut usize, flag: &str) -> Result<String, AppError> {
@@ -456,6 +469,22 @@ mod tests {
     fn get_requires_id_and_account() {
         let result = parse(["get".to_string(), "abc123".to_string()]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_parses_raw_body_flag() {
+        let result = parse([
+            "get".to_string(),
+            "abc123".to_string(),
+            "personal@gmail.com".to_string(),
+            "--raw-body".to_string(),
+        ]);
+
+        let Command::Get(args) = result.expect("expected get command") else {
+            panic!("expected get command");
+        };
+
+        assert!(args.raw_body);
     }
 
     #[test]

@@ -21,7 +21,7 @@ pub fn run(args: GetArgs) -> Result<String, AppError> {
         )));
     }
 
-    let message = get_message(account, &args.id)?;
+    let message = get_message(account, &args.id, args.raw_body)?;
 
     if args.json {
         Ok(format_json(&message))
@@ -50,8 +50,17 @@ fn format_text(message: &MessageDetail) -> String {
         lines.push(format!("labels: {}", message.labels.join(", ")));
     }
 
+    if !message.cleanup_metadata.is_empty() {
+        lines.push(String::new());
+        lines.push("metadata:".to_string());
+        for item in &message.cleanup_metadata {
+            lines.push(format!("- {item}"));
+        }
+    }
+
     lines.push(String::new());
     lines.push("body_text:".to_string());
+    lines.push(String::new());
     lines.push(message.body_text.clone());
 
     if !message.links.is_empty() {
@@ -99,6 +108,12 @@ fn format_json(message: &MessageDetail) -> String {
         .map(|link| json_string(link))
         .collect::<Vec<_>>()
         .join(", ");
+    let cleanup_metadata = message
+        .cleanup_metadata
+        .iter()
+        .map(|item| json_string(item))
+        .collect::<Vec<_>>()
+        .join(", ");
     let attachments = message
         .attachments
         .iter()
@@ -125,6 +140,11 @@ fn format_json(message: &MessageDetail) -> String {
             "\"cc\":{},",
             "\"subject\":{},",
             "\"labels\":[{}],",
+            "\"cleanup_metadata\":[{}],",
+            "\"stripped_tracking_links\":{},",
+            "\"stripped_boilerplate_blocks\":{},",
+            "\"body_structure_supported\":{},",
+            "\"body_structure_note\":{},",
             "\"body_text\":{},",
             "\"links\":[{}],",
             "\"attachments\":[{}]",
@@ -139,6 +159,15 @@ fn format_json(message: &MessageDetail) -> String {
         cc,
         json_string(&message.subject),
         labels,
+        cleanup_metadata,
+        message.stripped_tracking_links,
+        message.stripped_boilerplate_blocks,
+        message.body_structure_supported,
+        message
+            .body_structure_note
+            .as_ref()
+            .map(|value| json_string(value))
+            .unwrap_or_else(|| "null".to_string()),
         json_string(&message.body_text),
         links,
         attachments,
@@ -170,10 +199,16 @@ mod tests {
                 mime_type: "application/pdf".to_string(),
                 size_bytes: 48213,
             }],
+            cleanup_metadata: vec!["stripped 1 suspected tracking link".to_string()],
+            stripped_tracking_links: 1,
+            stripped_boilerplate_blocks: 0,
+            body_structure_supported: true,
+            body_structure_note: None,
         };
 
         let output = format_text(&message);
-        assert!(output.contains("body_text:"));
+        assert!(output.contains("metadata:"));
+        assert!(output.contains("body_text:\n\nCan you share the docs link?"));
         assert!(output.contains("attachments:"));
         assert!(output.contains("spec.pdf | application/pdf | 48213"));
     }

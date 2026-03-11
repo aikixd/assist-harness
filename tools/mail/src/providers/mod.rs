@@ -61,9 +61,13 @@ pub fn list_messages(
     }
 }
 
-pub fn get_message(account: &AccountEntry, message_id: &str) -> Result<MessageDetail, AppError> {
+pub fn get_message(
+    account: &AccountEntry,
+    message_id: &str,
+    raw_body: bool,
+) -> Result<MessageDetail, AppError> {
     match account.provider.as_ref() {
-        Some(Provider::Google) => google::get_message(account, message_id),
+        Some(Provider::Google) => google::get_message(account, message_id, raw_body),
         None => Err(AppError::query(format!(
             "account {} is not ready: {}",
             account.email, account.status

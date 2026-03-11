@@ -10,7 +10,7 @@ use crate::config::{load_provider_client_config, AccountEntry, Provider};
 use crate::domain::{Attachment, MessageDetail, MessageSummary};
 use crate::error::AppError;
 use crate::json::{parse as parse_json, JsonValue};
-use crate::render::{extract_links, html_to_readable_text, preview_text};
+use crate::render::{preview_text, render_message_body, BodyCandidate};
 use crate::time::{epoch_millis_to_local_timestamp, local_timestamp_to_epoch_seconds};
 
 use super::{ListQuery, MessageState};
@@ -86,13 +86,17 @@ pub fn list_messages(
     Ok(summaries)
 }
 
-pub fn get_message(account: &AccountEntry, message_id: &str) -> Result<MessageDetail, AppError> {
+pub fn get_message(
+    account: &AccountEntry,
+    message_id: &str,
+    raw_body: bool,
+) -> Result<MessageDetail, AppError> {
     let session = GmailSession::new(account)?;
     let response = session.api_get_message(message_id, "full")?;
     let root = parse_json(&response).map_err(|error| {
         AppError::query(format!("failed to parse Gmail message response: {error}"))
     })?;
-    let detail = parse_message_detail(&session, &root, account.email.clone())?;
+    let detail = parse_message_detail(&session, &root, account.email.clone(), raw_body)?;
     Ok(detail)
 }
 
@@ -127,6 +131,7 @@ pub fn exchange_code(code: &str, redirect_uri: &str) -> Result<TokenResponse, Ap
 }
 
 struct GmailSession {
+    account_email: String,
     access_token: String,
     label_map: LabelMap,
 }
@@ -148,6 +153,7 @@ impl GmailSession {
         })?;
 
         let mut session = Self {
+            account_email: account.email.clone(),
             access_token: merged.access_token,
             label_map: LabelMap::default(),
         };
@@ -229,7 +235,16 @@ impl GmailSession {
             .unwrap_or_default();
         let mut collector = PartCollector::default();
         collector.visit_part(payload)?;
-        let preview_source = render_body_text(&collector, &root);
+        let preview_source = render_message_body(
+            &self.account_email,
+            &id,
+            header_map.get("subject").map(String::as_str),
+            &collector.body_candidates,
+            collector.unsupported_structure.as_deref(),
+            root.get("snippet").and_then(JsonValue::as_str),
+            false,
+        )
+        .body_text;
 
         Ok(ListMessageDetail {
             id,
@@ -367,6 +382,7 @@ fn parse_message_detail(
     session: &GmailSession,
     root: &JsonValue,
     account_email: String,
+    raw_body: bool,
 ) -> Result<MessageDetail, AppError> {
     let id = required_str(root, "id")?.to_string();
     let thread_id = root
@@ -394,8 +410,15 @@ fn parse_message_detail(
 
     let mut collector = PartCollector::default();
     collector.visit_part(payload)?;
-    let body_text = render_body_text(&collector, root);
-    let links = extract_links(&body_text);
+    let rendered = render_message_body(
+        &account_email,
+        &id,
+        header_map.get("subject").map(String::as_str),
+        &collector.body_candidates,
+        collector.unsupported_structure.as_deref(),
+        root.get("snippet").and_then(JsonValue::as_str),
+        raw_body,
+    );
 
     Ok(MessageDetail {
         account: account_email,
@@ -407,17 +430,22 @@ fn parse_message_detail(
         cc: header_map.get("cc").cloned(),
         subject: header_map.get("subject").cloned().unwrap_or_default(),
         labels,
-        body_text,
-        links,
+        body_text: rendered.body_text,
+        links: rendered.links,
         attachments: collector.attachments,
+        cleanup_metadata: rendered.cleanup_metadata,
+        stripped_tracking_links: rendered.stripped_tracking_links,
+        stripped_boilerplate_blocks: rendered.stripped_boilerplate_blocks,
+        body_structure_supported: rendered.body_structure_supported,
+        body_structure_note: rendered.body_structure_note,
     })
 }
 
 #[derive(Default)]
 struct PartCollector {
-    text_bodies: Vec<String>,
-    html_bodies: Vec<String>,
+    body_candidates: Vec<BodyCandidate>,
     attachments: Vec<Attachment>,
+    unsupported_structure: Option<String>,
 }
 
 impl PartCollector {
@@ -430,6 +458,16 @@ impl PartCollector {
             .get("filename")
             .and_then(JsonValue::as_str)
             .unwrap_or("");
+
+        if mime_type.starts_with("multipart/")
+            && !matches!(
+                mime_type,
+                "multipart/alternative" | "multipart/mixed" | "multipart/related"
+            )
+            && self.unsupported_structure.is_none()
+        {
+            self.unsupported_structure = Some(mime_type.to_string());
+        }
 
         if !filename.is_empty() {
             let size_bytes = part
@@ -452,10 +490,11 @@ impl PartCollector {
         {
             let decoded = decode_base64_url(data)?;
             let text = String::from_utf8_lossy(&decoded).to_string();
-            if mime_type.starts_with("text/plain") {
-                self.text_bodies.push(text);
-            } else if mime_type.starts_with("text/html") {
-                self.html_bodies.push(text);
+            if mime_type.starts_with("text/plain") || mime_type.starts_with("text/html") {
+                self.body_candidates.push(BodyCandidate {
+                    mime_type: mime_type.to_string(),
+                    text,
+                });
             }
         }
 
@@ -468,28 +507,6 @@ impl PartCollector {
         Ok(())
     }
 }
-
-fn render_body_text(collector: &PartCollector, root: &JsonValue) -> String {
-    if !collector.text_bodies.is_empty() {
-        return collector.text_bodies.join("\n\n");
-    }
-
-    if !collector.html_bodies.is_empty() {
-        return collector
-            .html_bodies
-            .iter()
-            .map(|body| html_to_readable_text(body))
-            .filter(|body| !body.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-    }
-
-    root.get("snippet")
-        .and_then(JsonValue::as_str)
-        .map(html_to_readable_text)
-        .unwrap_or_default()
-}
-
 fn message_matches_time_window(
     internal_date_millis: &i64,
     query: &ListQuery,

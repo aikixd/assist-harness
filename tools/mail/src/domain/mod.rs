@@ -39,4 +39,9 @@ pub struct MessageDetail {
     pub body_text: String,
     pub links: Vec<String>,
     pub attachments: Vec<Attachment>,
+    pub cleanup_metadata: Vec<String>,
+    pub stripped_tracking_links: usize,
+    pub stripped_boilerplate_blocks: usize,
+    pub body_structure_supported: bool,
+    pub body_structure_note: Option<String>,
 }
