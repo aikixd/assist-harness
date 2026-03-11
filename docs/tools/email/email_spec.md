@@ -209,6 +209,99 @@ Rendering rules:
 - preview generation happens after whitespace normalization
 - `body_preview` is capped at 250 characters
 
+## Body Cleaning Pipeline
+
+The mail tool should treat body rendering as a cleanup pipeline, not just as HTML conversion.
+
+The goal is to produce readable, low-noise body text while preserving meaningful structure.
+
+### Source Selection
+
+V1-supported source shapes:
+- `text/plain`
+- `text/html`
+- `multipart/alternative`
+
+Wrapper multipart handling:
+- wrapper multipart structures may be supported when they contain one clear body candidate that can be descended into safely
+- exact wrapper handling rules are `TBD`
+
+Unsupported body structures:
+- when the message body structure is not supported yet, the tool should report that explicitly
+- the message should instruct the user to report the issue together with the account email and message id
+
+Example:
+```text
+message body structure <mime-type> is not supported yet
+report this issue with account <email> and message id <id>
+```
+
+Selection rules:
+- in `multipart/alternative`, select one primary body representation rather than merging multiple alternatives
+- if both `text/plain` and `text/html` are present, prefer the body that is meaningful after initial cleanup
+
+Current meaningful-body rules:
+- an empty body is not meaningful
+- a whitespace-only body is not meaningful
+
+Meaningfulness heuristics beyond those rules are `TBD`.
+
+### Link Handling
+
+Settled rules:
+- visible links in cleaned body output should be trimmed to a readable default length
+- the initial default visible link limit should be in the 100 to 120 character range
+- full links should still be preserved in extracted link data
+- tracking-link detection should be heuristic and score-based
+- links whose suspicion score crosses the tracking threshold should be treated as suspected tracking links
+- suspected tracking links should be omitted from cleaned body text
+- message metadata should include:
+
+```text
+stripped <n> suspected tracking links
+```
+
+Detailed scoring rules live in [email_spec_tracker_scoring.md](./email_spec_tracker_scoring.md).
+
+Exact trimming behavior is `TBD`.
+
+### Structure Preservation
+
+Settled rules:
+- preserve meaningful block boundaries where possible
+- if the original message visually separates a short block label from its content, the cleaned output should preserve that separation when possible
+- paragraph and block-level elements should render as separate blocks
+- rendered blocks should be separated by a blank line, similar to normal Markdown paragraphs
+- `<br>` should render as `\n`
+- normalization should collapse runs of more than two consecutive newlines down to two
+- inline tags should not create block boundaries by themselves
+- inline markup should be stripped while preserving inline text
+- list items should not be forced into separate paragraph blocks by default
+
+Additional structure-recovery rules are `TBD`.
+
+### Future Cleanup Stages
+
+These areas are expected, but not yet specified in detail:
+- tracking-link detection and cleanup: `TBD`
+- classic reply-chain quote handling: `TBD`
+- generic low-confidence deduplication policy: `TBD`
+
+### Boilerplate Stripping
+
+Settled rules:
+- boilerplate stripping should be conservative
+- only high-confidence boilerplate should be stripped
+- if confidence is low, preserve the content
+
+Eligible boilerplate classes:
+- unsubscribe, settings, or preferences blocks
+- legal or confidentiality footer blocks
+- product-branding footer blocks
+- clearly footer-like `view in browser` or `open in app` tails when they are not core message content
+
+Detailed scoring rules live in [email_spec_boilerplate_scoring.md](/home/aikixd/Dev/Personal/assist-harness/docs/tools/email/email_spec_boilerplate_scoring.md).
+
 ## `accounts` Command
 
 Purpose:
@@ -365,7 +458,7 @@ Purpose:
 - inspect one message in enough detail to decide what to do next
 
 Syntax:
-- `pa-mail get <id> <email>`
+- `pa-mail get <id> <email> [--raw-body]`
 
 Text output fields:
 - `acc`
@@ -380,6 +473,10 @@ Text output fields:
 - `body_text`
 - `links` when present
 - `attachments` when present
+
+Default rendering rule:
+- by default, `body_text` is cleaned and may omit content removed by the cleanup pipeline, such as suspected tracking links or stripped boilerplate
+- `--raw-body` should disable cleanup stripping and show the selected body with only basic conversion and normalization
 
 Example:
 ```text

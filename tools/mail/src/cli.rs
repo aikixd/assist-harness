@@ -238,6 +238,8 @@ fn get_help_text() -> String {
         "    Optional. Emit structured JSON instead of text.",
         "",
         "Behavior:",
+        "  - By default, body_text is cleaned and may omit suspected tracking links or other stripped content.",
+        "  - Use --raw-body to inspect the selected body without cleanup stripping.",
         "  - Does not search across accounts implicitly.",
         "  - Prints `message with id <id> not found` when the target message is missing.",
     ]
