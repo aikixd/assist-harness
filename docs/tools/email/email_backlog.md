@@ -24,6 +24,7 @@ The tool is intended for personal use, so some cases can be handled when they fi
 - Improve heavy HTML notification cleanup, especially for Notion and newsletter-style emails.
 - Strip tracking redirects, layout and table artifacts, duplicated blocks, quoted sections, and giant footer or legal boilerplate from cleaned bodies.
 - Preserve the small high-signal summary in notification emails instead of dumping the entire converted body when most of it is repetitive or low-value.
+- Handle traditional quoted email replies more cleanly in the future, especially `>`-prefixed quoted sections and common reply-chain markers.
 
 ## Notes
 

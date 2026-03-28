@@ -1,0 +1,11 @@
+[package]
+name = "tg"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+oauth = { path = "../../libs/oauth" }
+
+[[bin]]
+name = "pa-tg"
+path = "src/main.rs"
