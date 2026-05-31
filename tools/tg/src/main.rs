@@ -39,6 +39,7 @@ fn run() -> Result<String, AppError> {
         Command::Auth(args) => commands::auth::run(args),
         Command::Peers(args) => commands::peers::run(args),
         Command::PeersRevoke(args) => commands::peers::revoke(args),
+        Command::Pending(args) => commands::pending::run(args),
         Command::Recv(args) => commands::recv::run(args),
         Command::Send(args) => commands::send::run(args),
     }

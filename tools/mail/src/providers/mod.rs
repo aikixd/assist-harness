@@ -31,12 +31,24 @@ pub struct ListQuery {
     pub limit: Option<usize>,
 }
 
+pub fn resolve_account(account: &AccountEntry) -> AccountEntry {
+    match account.provider.as_ref() {
+        Some(Provider::Google) => google::resolve_account(account),
+        None => account.clone(),
+    }
+}
+
+pub fn account_not_ready_error(account: &AccountEntry) -> AppError {
+    let mut message = format!("account {} is not ready: {}", account.email, account.status);
+    if let Some(detail) = &account.detail {
+        message.push_str(&format!("\ndetail: {detail}"));
+    }
+    AppError::query(message)
+}
+
 pub fn validate_list_query(account: &AccountEntry, query: &ListQuery) -> Result<(), AppError> {
     let Some(provider) = account.provider.as_ref() else {
-        return Err(AppError::query(format!(
-            "account {} is not ready: {}",
-            account.email, account.status
-        )));
+        return Err(account_not_ready_error(account));
     };
 
     if query.label.is_some() && !supports_label_filter(provider) {
@@ -54,10 +66,7 @@ pub fn list_messages(
 ) -> Result<Vec<MessageSummary>, AppError> {
     match account.provider.as_ref() {
         Some(Provider::Google) => google::list_messages(account, query),
-        None => Err(AppError::query(format!(
-            "account {} is not ready: {}",
-            account.email, account.status
-        ))),
+        None => Err(account_not_ready_error(account)),
     }
 }
 
@@ -68,15 +77,35 @@ pub fn get_message(
 ) -> Result<MessageDetail, AppError> {
     match account.provider.as_ref() {
         Some(Provider::Google) => google::get_message(account, message_id, raw_body),
-        None => Err(AppError::query(format!(
-            "account {} is not ready: {}",
-            account.email, account.status
-        ))),
+        None => Err(account_not_ready_error(account)),
     }
 }
 
 fn supports_label_filter(provider: &Provider) -> bool {
     match provider {
         Provider::Google => google::supports_label_filter(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::{AccountStatus, Provider};
+
+    use super::*;
+
+    #[test]
+    fn account_not_ready_error_includes_detail_when_present() {
+        let account = AccountEntry {
+            email: "me@example.com".to_string(),
+            provider_name: Provider::Google.to_string(),
+            provider: Some(Provider::Google),
+            status: AccountStatus::TokenExpired,
+            detail: Some("stored refresh token is invalid or revoked".to_string()),
+        };
+
+        assert_eq!(
+            account_not_ready_error(&account).to_string(),
+            "account me@example.com is not ready: token_expired\ndetail: stored refresh token is invalid or revoked"
+        );
     }
 }

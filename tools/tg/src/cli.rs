@@ -8,6 +8,7 @@ pub enum Command {
     Auth(AuthArgs),
     Peers(PeersArgs),
     PeersRevoke(PeersRevokeArgs),
+    Pending(PendingArgs),
     Recv(RecvArgs),
     Send(SendArgs),
 }
@@ -19,6 +20,7 @@ pub enum HelpTopic {
     Bots,
     Auth,
     Peers,
+    Pending,
     Recv,
     Send,
 }
@@ -41,6 +43,12 @@ pub struct PeersArgs {
 pub struct PeersRevokeArgs {
     pub alias: String,
     pub bot: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingArgs {
+    pub bot: Option<String>,
+    pub peer: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +84,7 @@ where
         "bots" => parse_bots(&args[1..]),
         "auth" => parse_auth(&args[1..]),
         "peers" => parse_peers(&args[1..]),
+        "pending" => parse_pending(&args[1..]),
         "recv" => parse_recv(&args[1..]),
         "send" => parse_send(&args[1..]),
         other => Err(AppError::usage(format!(
@@ -92,6 +101,7 @@ pub fn help_text(topic: HelpTopic) -> String {
         HelpTopic::Bots => bots_help_text(),
         HelpTopic::Auth => auth_help_text(),
         HelpTopic::Peers => peers_help_text(),
+        HelpTopic::Pending => pending_help_text(),
         HelpTopic::Recv => recv_help_text(),
         HelpTopic::Send => send_help_text(),
     }
@@ -116,6 +126,8 @@ fn general_help_text() -> String {
         "    List known peers for a bot.",
         "  pa-tg peers revoke <alias> [--bot <name>]",
         "    Mark one peer as revoked.",
+        "  pa-tg pending [--bot <name>] [--peer <alias>]",
+        "    Count trusted pending messages without consuming them.",
         "  pa-tg recv [--bot <name>] [--peer <alias>] [--limit <n>] [--json]",
         "    Fetch trusted pending messages.",
         "  pa-tg send [--bot <name>] [--peer <alias>] (--text <text> | --stdin) [--json]",
@@ -203,6 +215,19 @@ fn recv_help_text() -> String {
         "",
         "Usage:",
         "  pa-tg recv [--bot <name>] [--peer <alias>] [--limit <n>] [--json]",
+    ]
+    .join("\n")
+}
+
+fn pending_help_text() -> String {
+    [
+        "pa-tg pending",
+        "",
+        "Purpose:",
+        "  Count pending messages from trusted peers without consuming them.",
+        "",
+        "Usage:",
+        "  pa-tg pending [--bot <name>] [--peer <alias>]",
     ]
     .join("\n")
 }
@@ -331,6 +356,32 @@ fn parse_peers(args: &[String]) -> Result<Command, AppError> {
     }
 
     Ok(Command::Peers(PeersArgs { bot, all, json }))
+}
+
+fn parse_pending(args: &[String]) -> Result<Command, AppError> {
+    if args.len() == 1 && is_help_flag(&args[0]) {
+        return Ok(Command::Help(HelpTopic::Pending));
+    }
+
+    let mut bot = None;
+    let mut peer = None;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--bot" => bot = Some(take_value(args, &mut index, "--bot")?),
+            "--peer" => peer = Some(take_value(args, &mut index, "--peer")?),
+            other => {
+                return Err(AppError::usage(format!(
+                    "unknown pending argument: {other}\n\n{}",
+                    help_text(HelpTopic::Pending)
+                )))
+            }
+        }
+        index += 1;
+    }
+
+    Ok(Command::Pending(PendingArgs { bot, peer }))
 }
 
 fn parse_recv(args: &[String]) -> Result<Command, AppError> {
@@ -487,5 +538,22 @@ mod tests {
         assert_eq!(args.peer.as_deref(), Some("owner"));
         assert_eq!(args.text.as_deref(), Some("hello"));
         assert!(args.json);
+    }
+
+    #[test]
+    fn pending_parses_peer_filter() {
+        let result = parse([
+            "pending".to_string(),
+            "--peer".to_string(),
+            "owner".to_string(),
+        ]);
+
+        assert_eq!(
+            result,
+            Ok(Command::Pending(PendingArgs {
+                bot: None,
+                peer: Some("owner".to_string()),
+            }))
+        );
     }
 }

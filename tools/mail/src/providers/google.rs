@@ -3,10 +3,11 @@ use std::process::Command;
 
 use oauth::{
     exchange_code_with_curl, load_client_config, load_token, merge_token_response,
-    refresh_token_with_curl, store_token, OAuthClientConfig, TokenResponse,
+    refresh_token_with_curl, store_token, token_status, OAuthClientConfig, OAuthError,
+    TokenResponse, TokenStatus,
 };
 
-use crate::config::{load_provider_client_config, AccountEntry, Provider};
+use crate::config::{load_provider_client_config, AccountEntry, AccountStatus, Provider};
 use crate::domain::{Attachment, MessageDetail, MessageSummary};
 use crate::error::AppError;
 use crate::json::{parse as parse_json, JsonValue};
@@ -130,6 +131,37 @@ pub fn exchange_code(code: &str, redirect_uri: &str) -> Result<TokenResponse, Ap
         .map_err(|error| AppError::config(format!("{error}")))
 }
 
+pub fn resolve_account(account: &AccountEntry) -> AccountEntry {
+    if account.status != AccountStatus::Ready {
+        return account.clone();
+    }
+
+    let mut resolved = account.clone();
+    match token_status(TOOL_NAME, &account.email) {
+        Ok(TokenStatus::Missing) => {
+            resolved.status = AccountStatus::AuthRequired;
+            resolved.detail = None;
+        }
+        Err(error) => {
+            resolved.status = AccountStatus::Misconfigured;
+            resolved.detail = Some(format!("failed to resolve token path: {error}"));
+        }
+        Ok(TokenStatus::Present) => match refresh_account_token(&account.email) {
+            Ok(_) => {
+                resolved.status = AccountStatus::Ready;
+                resolved.detail = None;
+            }
+            Err(error) => {
+                let (status, detail) = classify_refresh_error(error);
+                resolved.status = status;
+                resolved.detail = detail;
+            }
+        },
+    }
+
+    resolved
+}
+
 struct GmailSession {
     account_email: String,
     access_token: String,
@@ -138,23 +170,12 @@ struct GmailSession {
 
 impl GmailSession {
     fn new(account: &AccountEntry) -> Result<Self, AppError> {
-        let client = load_oauth_client()?;
-        let previous = load_token(TOOL_NAME, &account.email)
+        let token = load_token(TOOL_NAME, &account.email)
             .map_err(|error| AppError::config(format!("{error}")))?;
-        let refresh_token = previous
-            .refresh_token
-            .clone()
-            .ok_or_else(|| AppError::config("stored token is missing refresh_token"))?;
-        let refreshed = refresh_token_with_curl(TOKEN_ENDPOINT, &client, &refresh_token)
-            .map_err(|error| AppError::config(format!("{error}")))?;
-        let merged = merge_token_response(&previous, &refreshed);
-        store_token(TOOL_NAME, &account.email, &merged.raw_json).map_err(|error| {
-            AppError::config(format!("failed to store refreshed token: {error}"))
-        })?;
 
         let mut session = Self {
             account_email: account.email.clone(),
-            access_token: merged.access_token,
+            access_token: token.access_token,
             label_map: LabelMap::default(),
         };
         session.label_map = session.fetch_labels()?;
@@ -376,6 +397,53 @@ struct ListMessageDetail {
     subject: String,
     labels: Vec<String>,
     preview_source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GoogleRefreshError {
+    Config(String),
+    MissingRefreshToken,
+    OAuth(OAuthError),
+}
+
+fn refresh_account_token(account_email: &str) -> Result<TokenResponse, GoogleRefreshError> {
+    let client =
+        load_oauth_client().map_err(|error| GoogleRefreshError::Config(error.to_string()))?;
+    let previous = load_token(TOOL_NAME, account_email).map_err(GoogleRefreshError::OAuth)?;
+    let refresh_token = previous
+        .refresh_token
+        .clone()
+        .ok_or(GoogleRefreshError::MissingRefreshToken)?;
+    let refreshed = refresh_token_with_curl(TOKEN_ENDPOINT, &client, &refresh_token)
+        .map_err(GoogleRefreshError::OAuth)?;
+    let merged = merge_token_response(&previous, &refreshed);
+    store_token(TOOL_NAME, account_email, &merged.raw_json).map_err(|error| {
+        GoogleRefreshError::Config(format!("failed to store refreshed token: {error}"))
+    })?;
+    Ok(merged)
+}
+
+fn classify_refresh_error(error: GoogleRefreshError) -> (AccountStatus, Option<String>) {
+    match error {
+        GoogleRefreshError::MissingRefreshToken => (
+            AccountStatus::TokenExpired,
+            Some("stored token is missing refresh_token".to_string()),
+        ),
+        GoogleRefreshError::OAuth(OAuthError::TokenEndpoint(error))
+            if error.error_code() == Some("invalid_grant") =>
+        {
+            (
+                AccountStatus::TokenExpired,
+                Some("stored refresh token is invalid or revoked".to_string()),
+            )
+        }
+        GoogleRefreshError::OAuth(OAuthError::TokenParseFailed) => (
+            AccountStatus::Misconfigured,
+            Some("stored token file is malformed".to_string()),
+        ),
+        GoogleRefreshError::OAuth(error) => (AccountStatus::Misconfigured, Some(error.to_string())),
+        GoogleRefreshError::Config(detail) => (AccountStatus::Misconfigured, Some(detail)),
+    }
 }
 
 fn parse_message_detail(
@@ -673,5 +741,36 @@ mod tests {
         .expect("all query should build");
         assert!(!all.contains("is:read"));
         assert!(!all.contains("is:unread"));
+    }
+
+    #[test]
+    fn invalid_grant_maps_to_token_expired() {
+        let (status, detail) = classify_refresh_error(GoogleRefreshError::OAuth(
+            OAuthError::TokenEndpoint(oauth::TokenEndpointError {
+                request: oauth::TokenRequestKind::Refresh,
+                status_code: 400,
+                error: Some("invalid_grant".to_string()),
+                error_description: Some("Bad Request".to_string()),
+                raw_body: r#"{"error":"invalid_grant"}"#.to_string(),
+                stderr: String::new(),
+            }),
+        ));
+
+        assert_eq!(status, AccountStatus::TokenExpired);
+        assert_eq!(
+            detail.as_deref(),
+            Some("stored refresh token is invalid or revoked")
+        );
+    }
+
+    #[test]
+    fn missing_refresh_token_maps_to_token_expired() {
+        let (status, detail) = classify_refresh_error(GoogleRefreshError::MissingRefreshToken);
+
+        assert_eq!(status, AccountStatus::TokenExpired);
+        assert_eq!(
+            detail.as_deref(),
+            Some("stored token is missing refresh_token")
+        );
     }
 }

@@ -37,6 +37,7 @@ fn run() -> Result<String, AppError> {
         Command::Help(topic) => Ok(cli::help_text(topic)),
         Command::ConfigProvider => commands::config::provider::run(),
         Command::ConfigAccountAdd => commands::config::account_add::run(),
+        Command::ConfigAccountRefresh => commands::config::account_refresh::run(),
         Command::Accounts => commands::accounts::run(),
         Command::List(args) => commands::list::run(args),
         Command::Get(args) => commands::get::run(args),

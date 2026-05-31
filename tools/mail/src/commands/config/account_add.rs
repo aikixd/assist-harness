@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use oauth::{account_token_path, start_loopback_listener, store_token};
+use oauth::{account_token_path, start_loopback_listener, store_token, TokenResponse};
 
 use crate::config::{
     add_account, ensure_local_storage, load_accounts, validate_email, Provider, ACCOUNT_CONFIG_FILE,
@@ -43,6 +43,21 @@ pub fn run() -> Result<String, AppError> {
 }
 
 fn add_google_account(email: &str) -> Result<String, AppError> {
+    let token = exchange_google_token_with_browser()?;
+    let stored_token_path = store_token(TOOL_NAME, email, &token.raw_json)
+        .map_err(|error| AppError::config(format!("failed to store token: {error}")))?;
+    if let Err(error) = add_account(email, &Provider::Google) {
+        let _ = std::fs::remove_file(&stored_token_path);
+        return Err(error);
+    }
+
+    Ok(format!(
+        "account added: {email}\nprovider: {}\nstatus: ready",
+        google::provider_name()
+    ))
+}
+
+pub(super) fn exchange_google_token_with_browser() -> Result<TokenResponse, AppError> {
     let client = google::load_oauth_client()?;
     let listener =
         start_loopback_listener().map_err(|error| AppError::config(format!("{error}")))?;
@@ -58,18 +73,7 @@ fn add_google_account(email: &str) -> Result<String, AppError> {
         .wait_for_callback(Duration::from_secs(180))
         .map_err(|error| AppError::config(format!("{error}")))?;
 
-    let token = google::exchange_code(&callback.code, &redirect_uri)?;
-    let stored_token_path = store_token(TOOL_NAME, email, &token.raw_json)
-        .map_err(|error| AppError::config(format!("failed to store token: {error}")))?;
-    if let Err(error) = add_account(email, &Provider::Google) {
-        let _ = std::fs::remove_file(&stored_token_path);
-        return Err(error);
-    }
-
-    Ok(format!(
-        "account added: {email}\nprovider: {}\nstatus: ready",
-        google::provider_name()
-    ))
+    google::exchange_code(&callback.code, &redirect_uri)
 }
 
 fn parse_provider(input: &str) -> Result<Provider, AppError> {

@@ -6,6 +6,7 @@ pub enum Command {
     Help(HelpTopic),
     ConfigProvider,
     ConfigAccountAdd,
+    ConfigAccountRefresh,
     Accounts,
     List(ListArgs),
     Get(GetArgs),
@@ -16,6 +17,7 @@ pub enum HelpTopic {
     General,
     ConfigProvider,
     ConfigAccountAdd,
+    ConfigAccountRefresh,
     Accounts,
     List,
     Get,
@@ -68,6 +70,7 @@ pub fn help_text(topic: HelpTopic) -> String {
         HelpTopic::General => general_help_text(),
         HelpTopic::ConfigProvider => config_provider_help_text(),
         HelpTopic::ConfigAccountAdd => config_account_add_help_text(),
+        HelpTopic::ConfigAccountRefresh => config_account_refresh_help_text(),
         HelpTopic::Accounts => accounts_help_text(),
         HelpTopic::List => list_help_text(),
         HelpTopic::Get => get_help_text(),
@@ -87,6 +90,8 @@ fn general_help_text() -> String {
         "    Store local OAuth app credentials for a provider.",
         "  pa-mail config account add",
         "    Add one mailbox account and complete OAuth setup.",
+        "  pa-mail config account refresh",
+        "    Re-auth one existing mailbox account and replace its token.",
         "  pa-mail accounts",
         "    List configured accounts and their status.",
         "  pa-mail list --since <time> [--until <time>] [--account <email>] [--state <read|unread|all>] [--label <label>] [--limit <n>] [--json]",
@@ -158,6 +163,27 @@ fn config_account_add_help_text() -> String {
         "    The provider name. V1 supports: google",
         "",
         "Behavior:",
+        "  - Prints local config and token paths before continuing.",
+        "  - Starts a temporary loopback listener on 127.0.0.1 for OAuth callback.",
+        "  - Opens no browser automatically; you follow the printed URL manually.",
+    ]
+    .join("\n")
+}
+
+fn config_account_refresh_help_text() -> String {
+    [
+        "pa-mail config account refresh",
+        "",
+        "Purpose:",
+        "  Re-auth one existing mailbox account and replace its stored token.",
+        "",
+        "Usage:",
+        "  pa-mail config account refresh",
+        "",
+        "Behavior:",
+        "  - Loads configured accounts and checks their current readiness.",
+        "  - Shows only non-ready supported accounts as a numbered list.",
+        "  - Prompts for the email index to refresh.",
         "  - Prints local config and token paths before continuing.",
         "  - Starts a temporary loopback listener on 127.0.0.1 for OAuth callback.",
         "  - Opens no browser automatically; you follow the printed URL manually.",
@@ -256,8 +282,16 @@ fn parse_config(args: &[String]) -> Result<Command, AppError> {
             Ok(Command::Help(HelpTopic::ConfigAccountAdd))
         }
         [account, add] if account == "account" && add == "add" => Ok(Command::ConfigAccountAdd),
+        [account, refresh, flag]
+            if account == "account" && refresh == "refresh" && is_help_flag(flag) =>
+        {
+            Ok(Command::Help(HelpTopic::ConfigAccountRefresh))
+        }
+        [account, refresh] if account == "account" && refresh == "refresh" => {
+            Ok(Command::ConfigAccountRefresh)
+        }
         _ => Err(AppError::usage(format!(
-            "supported config commands:\n  pa-mail config provider\n  pa-mail config account add\n\n{}",
+            "supported config commands:\n  pa-mail config provider\n  pa-mail config account add\n  pa-mail config account refresh\n\n{}",
             help_text(HelpTopic::General)
         ))),
     }
@@ -500,6 +534,16 @@ mod tests {
     }
 
     #[test]
+    fn config_account_refresh_is_supported() {
+        let result = parse([
+            "config".to_string(),
+            "account".to_string(),
+            "refresh".to_string(),
+        ]);
+        assert_eq!(result, Ok(Command::ConfigAccountRefresh));
+    }
+
+    #[test]
     fn config_provider_is_supported() {
         let result = parse(["config".to_string(), "provider".to_string()]);
         assert_eq!(result, Ok(Command::ConfigProvider));
@@ -526,6 +570,17 @@ mod tests {
             "--help".to_string(),
         ]);
         assert_eq!(result, Ok(Command::Help(HelpTopic::ConfigAccountAdd)));
+    }
+
+    #[test]
+    fn config_account_refresh_help_is_supported() {
+        let result = parse([
+            "config".to_string(),
+            "account".to_string(),
+            "refresh".to_string(),
+            "--help".to_string(),
+        ]);
+        assert_eq!(result, Ok(Command::Help(HelpTopic::ConfigAccountRefresh)));
     }
 
     #[test]

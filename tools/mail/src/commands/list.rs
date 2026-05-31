@@ -3,7 +3,9 @@ use crate::config::{find_account, load_accounts, AccountEntry};
 use crate::domain::AccountMessageBlock;
 use crate::error::AppError;
 use crate::output::json_string;
-use crate::providers::{list_messages, validate_list_query, ListQuery};
+use crate::providers::{
+    account_not_ready_error, list_messages, resolve_account, validate_list_query, ListQuery,
+};
 
 pub fn run(args: ListArgs) -> Result<String, AppError> {
     let accounts = load_accounts()?;
@@ -20,18 +22,18 @@ pub fn run(args: ListArgs) -> Result<String, AppError> {
         limit: args.limit,
     };
 
-    for account in &selected_accounts {
+    let mut resolved_accounts = Vec::new();
+    for account in selected_accounts {
+        let account = resolve_account(account);
         if !account.is_ready() {
-            return Err(AppError::query(format!(
-                "account {} is not ready: {}",
-                account.email, account.status
-            )));
+            return Err(account_not_ready_error(&account));
         }
-        validate_list_query(account, &query)?;
+        validate_list_query(&account, &query)?;
+        resolved_accounts.push(account);
     }
 
     let mut blocks = Vec::new();
-    for account in selected_accounts {
+    for account in &resolved_accounts {
         let messages = list_messages(account, &query)?;
         let unread = messages
             .iter()

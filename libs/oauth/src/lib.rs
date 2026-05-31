@@ -57,6 +57,50 @@ pub struct TokenResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TokenRequestKind {
+    Exchange,
+    Refresh,
+}
+
+impl TokenRequestKind {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Exchange => "token exchange",
+            Self::Refresh => "token refresh",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenEndpointError {
+    pub request: TokenRequestKind,
+    pub status_code: u16,
+    pub error: Option<String>,
+    pub error_description: Option<String>,
+    pub raw_body: String,
+    pub stderr: String,
+}
+
+impl TokenEndpointError {
+    pub fn error_code(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    fn message(&self) -> String {
+        let detail = match (&self.error, &self.error_description) {
+            (Some(error), Some(description)) => format!("{error} ({description})"),
+            (Some(error), None) => error.clone(),
+            (None, Some(description)) => description.clone(),
+            (None, None) if !self.stderr.is_empty() => self.stderr.clone(),
+            (None, None) if !self.raw_body.trim().is_empty() => self.raw_body.trim().to_string(),
+            (None, None) => format!("HTTP {}", self.status_code),
+        };
+
+        format!("{} failed: {detail}", self.request.label())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OAuthError {
     MissingHome,
     Io(String),
@@ -66,6 +110,7 @@ pub enum OAuthError {
     StateMismatch,
     MissingCode,
     MissingEnv(String),
+    TokenEndpoint(TokenEndpointError),
     ProcessFailure(String),
     TokenParseFailed,
 }
@@ -81,6 +126,7 @@ impl Display for OAuthError {
             Self::StateMismatch => write!(f, "received OAuth callback with unexpected state"),
             Self::MissingCode => write!(f, "received OAuth callback without authorization code"),
             Self::MissingEnv(name) => write!(f, "required environment variable is missing: {name}"),
+            Self::TokenEndpoint(error) => write!(f, "{}", error.message()),
             Self::ProcessFailure(message) => write!(f, "{message}"),
             Self::TokenParseFailed => write!(f, "failed to parse OAuth token response"),
         }
@@ -222,35 +268,7 @@ pub fn exchange_code_with_curl(
         percent_encode(redirect_uri),
     );
 
-    let output = std::process::Command::new("curl")
-        .arg("--silent")
-        .arg("--show-error")
-        .arg("--fail")
-        .arg("-X")
-        .arg("POST")
-        .arg(token_endpoint)
-        .arg("-H")
-        .arg("Content-Type: application/x-www-form-urlencoded")
-        .arg("--data")
-        .arg(body)
-        .output()
-        .map_err(|error| OAuthError::ProcessFailure(format!("failed to run curl: {error}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = if stderr.is_empty() {
-            "curl exited with a non-zero status during token exchange".to_string()
-        } else {
-            format!("token exchange failed: {stderr}")
-        };
-        return Err(OAuthError::ProcessFailure(message));
-    }
-
-    let raw_json = String::from_utf8(output.stdout).map_err(|error| {
-        OAuthError::ProcessFailure(format!("token response was not valid UTF-8: {error}"))
-    })?;
-
-    parse_token_response(&raw_json)
+    execute_token_request(token_endpoint, &body, TokenRequestKind::Exchange)
 }
 
 pub fn refresh_token_with_curl(
@@ -265,10 +283,17 @@ pub fn refresh_token_with_curl(
         percent_encode(refresh_token),
     );
 
+    execute_token_request(token_endpoint, &body, TokenRequestKind::Refresh)
+}
+
+fn execute_token_request(
+    token_endpoint: &str,
+    body: &str,
+    request: TokenRequestKind,
+) -> Result<TokenResponse, OAuthError> {
     let output = std::process::Command::new("curl")
         .arg("--silent")
         .arg("--show-error")
-        .arg("--fail")
         .arg("-X")
         .arg("POST")
         .arg(token_endpoint)
@@ -276,24 +301,59 @@ pub fn refresh_token_with_curl(
         .arg("Content-Type: application/x-www-form-urlencoded")
         .arg("--data")
         .arg(body)
+        .arg("-w")
+        .arg("\n%{http_code}")
         .output()
         .map_err(|error| OAuthError::ProcessFailure(format!("failed to run curl: {error}")))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = if stderr.is_empty() {
-            "curl exited with a non-zero status during token refresh".to_string()
-        } else {
-            format!("token refresh failed: {stderr}")
-        };
-        return Err(OAuthError::ProcessFailure(message));
+    let raw_json = String::from_utf8(output.stdout).map_err(|error| {
+        OAuthError::ProcessFailure(format!(
+            "{} response was not valid UTF-8: {error}",
+            request.label()
+        ))
+    })?;
+    let (body, status) = raw_json.rsplit_once('\n').ok_or_else(|| {
+        OAuthError::ProcessFailure(format!(
+            "failed to parse curl response status for {}",
+            request.label()
+        ))
+    })?;
+    let status = status.trim().parse::<u16>().map_err(|_| {
+        OAuthError::ProcessFailure(format!(
+            "failed to parse HTTP status for {}",
+            request.label()
+        ))
+    })?;
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    if status == 200 {
+        return parse_token_response(body);
     }
 
-    let raw_json = String::from_utf8(output.stdout).map_err(|error| {
-        OAuthError::ProcessFailure(format!("refresh response was not valid UTF-8: {error}"))
-    })?;
+    if let Some(error) = parse_token_endpoint_error(body) {
+        return Err(OAuthError::TokenEndpoint(TokenEndpointError {
+            request,
+            status_code: status,
+            error: error.error,
+            error_description: error.error_description,
+            raw_body: body.to_string(),
+            stderr,
+        }));
+    }
 
-    parse_token_response(&raw_json)
+    let message = if !stderr.is_empty() {
+        format!("{} failed: {stderr}", request.label())
+    } else if !body.trim().is_empty() {
+        format!("{} failed: {}", request.label(), body.trim())
+    } else if output.status.success() {
+        format!("{} failed with HTTP {status}", request.label())
+    } else {
+        format!(
+            "curl exited with a non-zero status during {}",
+            request.label()
+        )
+    };
+    Err(OAuthError::ProcessFailure(message))
 }
 
 pub fn merge_token_response(previous: &TokenResponse, updated: &TokenResponse) -> TokenResponse {
@@ -500,6 +560,26 @@ fn parse_token_response(raw_json: &str) -> Result<TokenResponse, OAuthError> {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedTokenEndpointError {
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+fn parse_token_endpoint_error(raw_json: &str) -> Option<ParsedTokenEndpointError> {
+    let error = extract_json_string(raw_json, "error");
+    let error_description = extract_json_string(raw_json, "error_description");
+
+    if error.is_none() && error_description.is_none() {
+        None
+    } else {
+        Some(ParsedTokenEndpointError {
+            error,
+            error_description,
+        })
+    }
+}
+
 fn token_response_to_json(token: &TokenResponse) -> String {
     let mut fields = vec![format!(
         "\"access_token\":\"{}\"",
@@ -673,5 +753,37 @@ mod tests {
         assert_eq!(merged.access_token, "new-at");
         assert_eq!(merged.refresh_token.as_deref(), Some("rt"));
         assert!(merged.raw_json.contains("\"refresh_token\":\"rt\""));
+    }
+
+    #[test]
+    fn token_endpoint_error_parser_extracts_oauth_fields() {
+        let parsed = parse_token_endpoint_error(
+            r#"{"error":"invalid_grant","error_description":"Bad Request"}"#,
+        );
+
+        assert_eq!(
+            parsed,
+            Some(ParsedTokenEndpointError {
+                error: Some("invalid_grant".to_string()),
+                error_description: Some("Bad Request".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn token_endpoint_error_display_prefers_oauth_detail() {
+        let error = TokenEndpointError {
+            request: TokenRequestKind::Refresh,
+            status_code: 400,
+            error: Some("invalid_grant".to_string()),
+            error_description: Some("Bad Request".to_string()),
+            raw_body: r#"{"error":"invalid_grant"}"#.to_string(),
+            stderr: "curl: (22) The requested URL returned error: 400".to_string(),
+        };
+
+        assert_eq!(
+            error.message(),
+            "token refresh failed: invalid_grant (Bad Request)"
+        );
     }
 }

@@ -1,13 +1,11 @@
 use std::collections::BTreeMap;
 
 use crate::cli::RecvArgs;
+use crate::commands::inbox::{scan_pending, PendingScanOptions};
 use crate::config::{find_peer, load_cursor, load_peers, resolve_bot, store_cursor};
 use crate::domain::{MessageKind, PeerStatus, RecvBlock, RecvMessage};
 use crate::error::AppError;
 use crate::output::json_string;
-use crate::providers::get_updates;
-
-const BATCH_LIMIT: usize = 100;
 
 pub fn run(args: RecvArgs) -> Result<String, AppError> {
     let bot = resolve_bot(args.bot.as_deref())?;
@@ -29,87 +27,26 @@ pub fn run(args: RecvArgs) -> Result<String, AppError> {
         }
     }
 
-    let mut offset = load_cursor(&bot.alias)?;
-    let mut highest_seen: Option<u64> = None;
-    let limit = args.limit.unwrap_or(20);
-    let mut messages = Vec::new();
+    let result = scan_pending(
+        &bot,
+        &trusted,
+        load_cursor(&bot.alias)?,
+        &PendingScanOptions {
+            peer_alias: requested_peer,
+            limit: Some(args.limit.unwrap_or(20)),
+            collect_messages: true,
+        },
+    )?;
 
-    loop {
-        let updates = get_updates(&bot, offset, BATCH_LIMIT)?;
-        if updates.is_empty() {
-            break;
-        }
-
-        for update in &updates {
-            highest_seen = Some(highest_seen.map_or(update.update_id, |current: u64| {
-                current.max(update.update_id)
-            }));
-            let Some(message) = &update.message else {
-                continue;
-            };
-            if message.chat_type != "private" {
-                continue;
-            }
-
-            let Some(peer) = trusted.iter().find(|peer| peer.chat_id == message.chat_id) else {
-                continue;
-            };
-            if let Some(alias) = requested_peer {
-                if peer.alias != alias {
-                    continue;
-                }
-            }
-
-            let (kind, text, content_type) = match (&message.text, &message.content_type) {
-                (Some(text), _) => (MessageKind::Text, text.clone(), None),
-                (None, Some(content_type)) => (
-                    MessageKind::Unsupported,
-                    format!("unsupported trusted message type: {content_type}"),
-                    Some(content_type.clone()),
-                ),
-                (None, None) => (
-                    MessageKind::Unsupported,
-                    "unsupported trusted message type: non_text_message".to_string(),
-                    Some("non_text_message".to_string()),
-                ),
-            };
-
-            messages.push(RecvMessage {
-                peer_alias: peer.alias.clone(),
-                chat_id: peer.chat_id,
-                update_id: update.update_id,
-                message_id: Some(message.message_id),
-                date: message.date.clone(),
-                from: message.from_name.clone(),
-                text,
-                kind,
-                content_type,
-            });
-        }
-
-        if messages.len() >= limit {
-            messages.truncate(limit);
-            break;
-        }
-
-        if updates.len() < BATCH_LIMIT {
-            break;
-        }
-        offset = updates
-            .last()
-            .map(|update| update.update_id + 1)
-            .unwrap_or(offset);
-    }
-
-    if let Some(highest_seen) = highest_seen {
+    if let Some(highest_seen) = result.highest_seen_update_id {
         store_cursor(&bot.alias, highest_seen + 1)?;
     }
 
-    if messages.is_empty() {
+    if result.messages.is_empty() {
         return Ok("no messages".to_string());
     }
 
-    let blocks = group_messages(&messages);
+    let blocks = group_messages(&result.messages);
     if args.json {
         Ok(format_json(&blocks))
     } else {

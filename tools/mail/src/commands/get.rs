@@ -3,7 +3,7 @@ use crate::config::{find_account, load_accounts};
 use crate::domain::MessageDetail;
 use crate::error::AppError;
 use crate::output::json_string;
-use crate::providers::get_message;
+use crate::providers::{account_not_ready_error, get_message, resolve_account};
 
 pub fn run(args: GetArgs) -> Result<String, AppError> {
     let accounts = load_accounts()?;
@@ -13,15 +13,13 @@ pub fn run(args: GetArgs) -> Result<String, AppError> {
 
     let account = find_account(&accounts, &args.account)
         .ok_or_else(|| AppError::query(format!("account {} is not configured", args.account)))?;
+    let account = resolve_account(account);
 
     if !account.is_ready() {
-        return Err(AppError::query(format!(
-            "account {} is not ready: {}",
-            account.email, account.status
-        )));
+        return Err(account_not_ready_error(&account));
     }
 
-    let message = get_message(account, &args.id, args.raw_body)?;
+    let message = get_message(&account, &args.id, args.raw_body)?;
 
     if args.json {
         Ok(format_json(&message))

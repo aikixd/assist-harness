@@ -93,12 +93,14 @@ V1 commands:
 - `pa-tg bots`
 - `pa-tg auth --alias <alias> [--bot <name>] [--stdin]`
 - `pa-tg peers [--bot <name>] [--all] [--json]`
+- `pa-tg pending [--bot <name>] [--peer <alias>]`
 - `pa-tg recv [--bot <name>] [--peer <alias>] [--limit <n>] [--json]`
 - `pa-tg send [--bot <name>] [--peer <alias>] --text <text> [--json]`
 - `pa-tg peers revoke <alias> [--bot <name>]`
 
 Rules:
 - `send` targets trusted peers only
+- `pending` counts trusted pending messages without consuming them
 - `recv` returns messages from trusted peers only
 - `recv` consumes update stream progress even when it discards untrusted updates
 - `auth` may create trust but must not send any Telegram message itself
@@ -248,6 +250,41 @@ text: please summarize the latest errors
 `--limit <n>` limits returned trusted messages, not raw Telegram updates scanned.
 
 The tool may need to read more than `n` raw updates in order to find `n` trusted messages.
+
+## `pending`
+
+### Purpose
+
+Count pending inbound traffic from trusted peers without consuming it.
+
+### Usage
+
+V1 usage:
+- `pa-tg pending [--bot <name>] [--peer <alias>]`
+
+### Behavior
+
+`pending` must:
+- use the same trusted/private-chat filtering rules as `recv`
+- count text and unsupported trusted inbound messages
+- ignore untrusted chats and non-message updates
+- not advance the stored update cursor
+
+This means:
+- a later `recv` should still return the same pending trusted messages
+- `pending` acts as a non-consuming peek
+
+### Output Rules
+
+Default output is a bare integer.
+
+Examples:
+```text
+0
+3
+```
+
+No `--json` mode is required for V1.
 
 ## `send`
 
